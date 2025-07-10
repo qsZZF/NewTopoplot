@@ -3,7 +3,7 @@ function handles = Newtopoplot(Values,chanlocs,eegtopoSet,varargin)
 %   handles =  Newtopoplot(Values,chanlocs,eegtopoSet,varargin);
 %       Another two functions arrow & predint needed.
 %   Input:
-%      -Values: []/ nchan X 1 vector/ nchanT X 2(3) matrix, if Values is
+%      -Values(needed): []/ nchan X 1 vector/ nchanT X 2(3) matrix, if Values is
 %               empty([]), then Newtopoplot plots EEG channel locations; if Values
 %               is nchan by 1 vector(where nchan is the number of channels,length(chanlocs)),
 %               then Newtopoplot plots spatial weights topography;
@@ -13,14 +13,14 @@ function handles = Newtopoplot(Values,chanlocs,eegtopoSet,varargin)
 %               columns are the serial number of channels(e.g Values = [2,3]
 %               means that channel 2 and 3 have connectivity); the third column(if
 %               provided) is the strength of connectivity(e.g Values = [2,3,0.5])
-%      -chanlocs: Channel locations structure. Using EEGlab EEG.chanlocs or
+%      -chanlocs(needed): Channel locations structure. Using EEGlab EEG.chanlocs or
 %               location structure S containing:
 %                   S.labels,S.theta,S.radiu,S.X,S.Y,S.Z
-%      -eegtopoSet(the programme load it by default):
+%      -eegtopoSet(needed but the programme load it by default):
 %               Settings of topography, which has been provided as 'EEGtopoSet'.
-%              
+%               Newtopoplot will load it if exists, or you need to provide it
 %   Options:
-%      -CLim(default [0,1]):color limits of topography, 2 by 1 vector
+%      -CLim(default [-1,1]*max(Value)):color limits of topography, 2 by 1 vector
 %      -electrodes(default 'on'): 'off': don't show electrodes; 'on': show
 %               electordes; 'numbers': show electrodes and channel serial
 %               number; 'text': show electrodes and channel labels
@@ -70,22 +70,37 @@ function handles = Newtopoplot(Values,chanlocs,eegtopoSet,varargin)
 %       plot directed connectivity topography with strength values
 %           nchan = length(chanlocs); Values = randi(nchan,12,3);
 %           figure;Newtopoplot(Values,chanlocs,[],'electrodes','on','LineWidth',3,'colormap','jet');
-%
-%
-%   Written by FengZhao <zhaofeng.stu@gmail.com>
+
+%   Written by FengZhao
 %   Last modified:2024
 %   ZheJiang University
 %
 %
+
 % load coordinates
 if nargin<3||isempty(eegtopoSet)
     try
         path2file = which('Newtopoplot');
         path2set = fileparts(path2file);
+        addpath(genpath(path2set));
         path2set = fullfile(path2set,'EEGtopoSet');
         load(path2set,'eegtopoSet');
     catch
         error('No topograph setting found');
+    end
+end
+% check Values
+istopo = 0;
+if ~isempty(Values)
+    if isvector(Values)
+        if numel(Values) == length(chanlocs)
+            istopo = 1;
+        elseif numel(Values) == 2 || numel(Values) == 3
+            % then it should be connectivity indices
+            Values = reshape(Values,1,[]);
+        else
+            error('Invalid input Values. The Values should either be a vector of nChan elements, or be a N*2/N*3 vector/matrix of connectivity data.')
+        end
     end
 end
 
@@ -102,7 +117,10 @@ electrodeColor = [0 0 0];
 textColor = [0 0 0];
 lineColor = [0 0 0];
 LineWidth = 2;
-CLim = [0 1];
+CLim = [-1 1];
+if ~isempty(Values) && istopo
+   CLim = CLim*max(abs(Values)); 
+end
 colorMap = CBar;
 electrodeSize = 20;
 headLineWidth = 1.5;
@@ -156,6 +174,9 @@ if nargs > 3
                 end
             case 'electrodesize'
                 electrodeSize = Value;
+                if length(electrodeSize)>1&&length(electrodeSize)~=length(chanlocs)
+                    error('the number of electrodeSize not equal to number of channel location');
+                end
             case 'headlinewidth'
                 headLineWidth = Value;
             case 'clim'
@@ -180,12 +201,10 @@ if nargs > 3
             case 'axes'
                 ax2plot = Value;
         end
-    end
-    
-    
+    end  
 end
 handles.axes = ax2plot;
-colormap(colorMap);
+colormap(handles.axes,colorMap);
 %% Read channel location
 Th=[chanlocs.theta];
 Rd=[chanlocs.radius];
@@ -196,7 +215,7 @@ allchansind = 1:length(Th);
 %% remove infinite and NaN values
 inds = [];
 if ~isempty(Values)
-    if size(Values,1)==1||size(Values,2)==1
+    if istopo
         Values = Values(:);
     end
     inds = union(find(isnan(Values)), find(isinf(Values))); % NaN and Inf values
@@ -239,15 +258,31 @@ plot(ax2plot,eegtopoSet.Cnose(:,1)/k,eegtopoSet.Cnose(:,2)/k,'Color',headColor,'
 if strcmp(ELECTRODES,'off')
     plot(ax2plot,xx/k,yy/k,'.','MarkerSize',0.001,'Color','none');
 else
-    plot(ax2plot,xx/k,yy/k,'.','MarkerSize',electrodeSize,'Color',electrodeColor);
-    if strcmp(ELECTRODES,'labels')
-        text(ax2plot,xx/k,yy/k+1.2*electrodeSize,{chanlocs(plotchans).labels},'HorizontalAlignment','center',...
-            'VerticalAlignment','middle','Color',textColor,'hittest','off','FontName','Arial','FontSize',textSize);
-    end
-    if strcmp(ELECTRODES,'numbers')
-        text(ax2plot,xx/k,yy/k+1.2*electrodeSize,num2str(allchansind(:)),'HorizontalAlignment','center',...
-            'VerticalAlignment','middle','Color',textColor,'hittest','off','FontName','Arial','FontSize',textSize);
-        
+    if length(electrodeSize)>1
+        for numplot = 1:length(plotchans)
+            plot(ax2plot,xx(numplot)/k,yy(numplot)/k,'.','MarkerSize',electrodeSize(plotchans(numplot)),'Color',electrodeColor);
+            if strcmp(ELECTRODES,'labels')
+                text(ax2plot,xx(numplot)/k,yy(numplot)/k+1.2*electrodeSize(plotchans(numplot)),{chanlocs(plotchans).labels},'HorizontalAlignment','center',...
+                    'VerticalAlignment','middle','Color',textColor,'hittest','off','FontName','Arial','FontSize',textSize);
+            end
+            if strcmp(ELECTRODES,'numbers')
+                text(ax2plot,xx(numplot)/k,yy(numplot)/k+1.2*electrodeSize(plotchans(numplot)),num2str(allchansind(:)),'HorizontalAlignment','center',...
+                    'VerticalAlignment','middle','Color',textColor,'hittest','off','FontName','Arial','FontSize',textSize);
+
+            end
+        end
+    else
+
+        plot(ax2plot,xx/k,yy/k,'.','MarkerSize',electrodeSize,'Color',electrodeColor);
+        if strcmp(ELECTRODES,'labels')
+            text(ax2plot,xx/k,yy/k+1.2*electrodeSize,{chanlocs(plotchans).labels},'HorizontalAlignment','center',...
+                'VerticalAlignment','middle','Color',textColor,'hittest','off','FontName','Arial','FontSize',textSize);
+        end
+        if strcmp(ELECTRODES,'numbers')
+            text(ax2plot,xx/k,yy/k+1.2*electrodeSize,num2str(allchansind(:)),'HorizontalAlignment','center',...
+                'VerticalAlignment','middle','Color',textColor,'hittest','off','FontName','Arial','FontSize',textSize);
+
+        end
     end
 end
 Rratio = max(1,max(Rd)/0.55);
@@ -260,7 +295,7 @@ if isempty(Values)
 end
 if ~isempty(Values)
     
-    if size(Values,2)==1
+    if size(Values,2)==1 && istopo
         % Plot topo weight/energy values
         Values = Values(plotchans,:);
         if ~isInside && max(Rd)>=0.5495
@@ -343,14 +378,15 @@ if ~isempty(Values)
         end
         if size(Values,2)==3
             lineC = Values(:,3);
-            if length(lineC) == 1
+            if (max(lineC)==min(lineC))
                 color2plot = repmat(lineColor,size(Values,1),1);
             else
                 %             lineC = (lineC-min(lineC));
                 cm = colorMap;
-                lineC = lineC*abs(diff(CLim))/(max(lineC)-min(lineC));
-                lineC = lineC+min(CLim)-min(lineC);
-                lineC = round((lineC-min(lineC))/abs(diff(CLim))*(size(cm,1)-1))+1;
+%                 lineC = lineC*abs(diff(CLim))/(max(lineC)-min(lineC));
+%                 lineC = lineC+min(CLim)-min(lineC);
+                lineC = round((lineC-min(CLim))/abs(diff(CLim))*(size(cm,1)-1))+1;
+                lineC(lineC<1) = 1; lineC(lineC>size(cm,1)) = size(cm,1);
                 color2plot = cm(lineC,:);
             end
         else
@@ -362,7 +398,7 @@ if ~isempty(Values)
             for ki = 1:size(ChanPair,1)
                 set(gcf,'CurrentAxes',ax2plot);
                 arrow([xx(ChanPair(ki,1)),yy(ChanPair(ki,1))],[xx(ChanPair(ki,2)),yy(ChanPair(ki,2))],...
-                    [electrodeSize;electrodeSize],'width',LineWidth,'length',arrowLen,...
+                    [electrodeSize(1);electrodeSize(1)],'width',LineWidth,'length',arrowLen,...
                     'TipAngle',15,'FaceColor',color2plot(ki,:),'EdgeColor','none');
             end
         else
@@ -411,7 +447,7 @@ function matrixOut = smooth2a(matrixIn,Nr,Nc)
 %
 % 	Developed from code written by Olof Liungman, 1997
 % 	Dept. of Oceanography, Earth Sciences Centre
-% 	G�teborg University, Sweden
+% 	G锟絫eborg University, Sweden
 % 	E-mail: olof.liungman@oce.gu.se
 
 %
@@ -541,3 +577,4 @@ catch
     error('too large k value');
 end 
 end
+
