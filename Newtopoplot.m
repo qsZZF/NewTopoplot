@@ -1,580 +1,731 @@
-function handles = Newtopoplot(Values,chanlocs,eegtopoSet,varargin)
-%Newtopoplot plots  EEG channel locations topography/spatial weights topography/ spatial connectivity topography
-%   handles =  Newtopoplot(Values,chanlocs,eegtopoSet,varargin);
-%       Another two functions arrow & predint needed.
-%   Input:
-%      -Values(needed): []/ nchan X 1 vector/ nchanT X 2(3) matrix, if Values is
-%               empty([]), then Newtopoplot plots EEG channel locations; if Values
-%               is nchan by 1 vector(where nchan is the number of channels,length(chanlocs)),
-%               then Newtopoplot plots spatial weights topography;
-%               if Values is nchanT by 2 or 3 matrix, then Newtopoplot
-%               plots connectivity topography, note that nchanT is the number of
-%               pairs of electrodes to plot connectivity lines, and the first two
-%               columns are the serial number of channels(e.g Values = [2,3]
-%               means that channel 2 and 3 have connectivity); the third column(if
-%               provided) is the strength of connectivity(e.g Values = [2,3,0.5])
-%      -chanlocs(needed): Channel locations structure. Using EEGlab EEG.chanlocs or
-%               location structure S containing:
-%                   S.labels,S.theta,S.radiu,S.X,S.Y,S.Z
-%      -eegtopoSet(needed but the programme load it by default):
-%               Settings of topography, which has been provided as 'EEGtopoSet'.
-%               Newtopoplot will load it if exists, or you need to provide it
-%   Options:
-%      -CLim(default [-1,1]*max(Value)):color limits of topography, 2 by 1 vector
-%      -electrodes(default 'on'): 'off': don't show electrodes; 'on': show
-%               electordes; 'numbers': show electrodes and channel serial
-%               number; 'text': show electrodes and channel labels
-%      -plotchans(default is 1:length(chanlocs)): channel numbers to plot,vector
-%      -plotrad(default is 0.55):radius of cartoon head, no need to change in general,float
-%      -isInside(default is false): true:plot channels inside head(max(chanlocs.radius)<plotrad)
-%                false: plot all channels
-%      -headColor(default is [0 0 0]): color of cartoon head and ear; 3 by
-%                1 vector.
-%      -headLineWidth(default is 2.5): line width of cartoon head; float
-%      -electrodeSize(default is 20): size of electrode. float
-%      -electrodColor(default is [0 0 0]): color of electrode
-%      -textColor(default is [0 0 0]): color of electrode numbers/labels.(see Options:electrodes)
-%      -textSize(default is 10): size of electrode numbers/labels
-%      -contournum(default is 0): number contour lines in spatial weight topography, int (not recommended)
-%      -shading(default is 'interp'): 'interp'/'flat',
-%      -colormap(default is jet):colormap, if you plot connectivity with
-%               values(nchanT X 3), better specific it so that color of connectivity line is
-%               consistent with colormap
-%      -isDir(default is false): used when plot connectivity topography.
-%               true: plot directed connectivity topography using arrow. The
-%                   direction is from the first column to second column
-%                   (e.g [2,3], the arrow starts from channel 2 point at channel 3, see Input:Values)
-%               false: plot undirected connectivity topography
-%      -LineWidth(defalut is 2): connectivity line width, float
-%      -LineColor(defalut is [0 0 0]): connectivity line color, used when no connectivity strength
-%               specified(nchanT X 2, see Input:Values); if strength has
-%               been specified(nchanT X 3), then line color is calculated
-%               using strength according to colormap(see Options:colormap)
-%      -Axes: default is gca; plot topography on specific axis if provided.
-%   Examples:
-%       plot channel inside head locations with labels:
-%           figure;Newtopoplot([],chanlocs,[],'electrodes','labels','isInside',true);
-%       plot spatial weight topography
-%           nchan = length(chanlocs);Values = rand(nchan,1);
-%           figure;Newtopoplot(Values,chanlocs,[],'electrodes','labels','isInside',false);
-%       plot spatial weight topography in region of interest(ROI)
-%           nchan = length(chanlocs); ROI = 1:10;% channel 1-10 as ROI
-%           Values = nan(nchan,1); Values(ROI) = rand(ROI,1);
-%           figure;Newtopoplot(Values,chanlocs,[],'electrodes','labels','isInside',false);
-%           Note: Values = nan(nchan,1), then Newtopoplot only plots values inside ROI;
-%               if you want to plot values in the whole head, then specific
-%               values outside ROI first, e.g Values = zeros(nchan,1);
-%       plot undirected connectivity topography without strength values
-%           nchan = length(chanlocs); Values = randi(nchan,12,2);
-%           figure;Newtopoplot(Values,chanlocs,[],'electrodes','on','LineWidth',3,'LineColor',[1 0 0]);
-%       plot directed connectivity topography with strength values
-%           nchan = length(chanlocs); Values = randi(nchan,12,3);
-%           figure;Newtopoplot(Values,chanlocs,[],'electrodes','on','LineWidth',3,'colormap','jet');
-
-%   Written by FengZhao
-%   Last modified:2024
-%   ZheJiang University
+function handles = Newtopoplot(Values, chanlocs, eegtopoSet, varargin)
+%NEWTOPOPLOT Self-contained EEG topography/connectivity plotting.
 %
+% handles = Newtopoplot(Values, chanlocs, eegtopoSet, ...)
 %
+% This implementation keeps the original plugin interface and reproduces
+% the EEGtopoSet geometry. The external arrow helper is not required.
+%
+% Common options:
+%   'CLim'              [min max], default [0 1]
+%   'electrodes'        'off'|'on'|'numbers'|'labels', default 'on'
+%   'plotchans'         channel indices, default all channels
+%   'plotrad'           head radius in EEGLAB polar units, default 0.55
+%   'isInside'          true/false, default false
+%   'headColor'         RGB, default [0 0 0]
+%   'headLineWidth'     scalar, default 1.5
+%   'electrodeSize'     marker size, default 20
+%   'electrodeColor'    RGB, default [0 0 0]
+%   'textColor'         RGB, default [0 0 0]
+%   'textSize'          scalar, default 10
+%   'numContour'        contour count, default 0
+%   'shading'           'interp'|'flat', default 'interp'
+%   'colormap'          n x 3 colormap, default local CBar()
+%   'isDirection'       directed connectivity, default false
+%   'LineWidth'         connectivity line width, default 2
+%   'LineColor'         RGB, default [0 0 0]
+%   'Axes'              target axes, default gca
+%   'gridScale'         interpolation grid resolution, default 90
+%   'coordScale'        plot coordinate scale, default 1
+%   'boundaryAnchors'   add mean-valued head-boundary anchors, default false
 
-% load coordinates
-if nargin<3||isempty(eegtopoSet)
-    try
-        path2file = which('Newtopoplot');
-        path2set = fileparts(path2file);
-        addpath(genpath(path2set));
-        path2set = fullfile(path2set,'EEGtopoSet');
-        load(path2set,'eegtopoSet');
-    catch
-        error('No topograph setting found');
-    end
+if nargin < 3 || isempty(eegtopoSet)
+    eegtopoSet = [];
 end
-% check Values
-istopo = 0;
-if ~isempty(Values)
-    if isvector(Values)
-        if numel(Values) == length(chanlocs)
-            istopo = 1;
-        elseif numel(Values) == 2 || numel(Values) == 3
-            % then it should be connectivity indices
-            Values = reshape(Values,1,[]);
-        else
-            error('Invalid input Values. The Values should either be a vector of nChan elements, or be a N*2/N*3 vector/matrix of connectivity data.')
-        end
-    end
-end
+eegtopoSet = resolveEegTopoSet(eegtopoSet);
 
+settings = defaultSettings(chanlocs);
+settings = parseOptions(settings, varargin{:});
 
-% default setting
-CONTOURNUM = 0;
-ELECTRODES = 'on';
-isInside = false;
-isDir = false;
-plotrad = 0.55;
-SHADING = 'interp';
-headColor = [0 0 0];
-electrodeColor = [0 0 0];
-textColor = [0 0 0];
-lineColor = [0 0 0];
-LineWidth = 2;
-CLim = [-1 1];
-if ~isempty(Values) && istopo
-   CLim = CLim*max(abs(Values)); 
-end
-colorMap = CBar;
-electrodeSize = 20;
-headLineWidth = 1.5;
-plotchans = 1:length(chanlocs);
-textSize = 10;
-ax2plot = gca;
-
-nargs = nargin;
-if nargs > 3
-    for iter = 1:2:length(varargin)
-        Param = lower(varargin{iter});
-        Value = varargin{iter+1};
-        switch Param
-            case 'numcontour'
-                CONTOURNUM = Value;
-            case 'electrodes'
-                ELECTRODES = lower(Value);
-            case 'plotrad'
-                plotrad = Value;
-            case 'shading'
-                SHADING = Value;
-                if ~any(strcmpi(SHADING,{'flat','interp'}))
-                    error('Invalid shading parameter')
-                end
-            case 'headcolor'
-                headColor = Value;
-                if size(Value,2)~=3
-                    error('Head color must be a 1 x 3 matrix')
-                end
-            case 'electrodecolor'
-                electrodeColor = Value;
-                if size(Value,2)~=3
-                    error('Electrode color must be a 1 x 3 matrix')
-                end
-            case 'textcolor'
-                textColor = Value;
-                if size(Value,2)~=3
-                    error('Head color must be a 1 x 3 matrix')
-                end
-            case 'linewidth'
-                LineWidth = Value;
-            case 'linecolor'
-                lineColor = Value;
-                if size(Value,2)~=3
-                    error('Head color must be a 1 x 3 matrix')
-                end
-            case 'colormap'
-                colorMap = Value;
-                if size(Value,2)~=3
-                    error('Colormap must be a n x 3 matrix')
-                end
-            case 'electrodesize'
-                electrodeSize = Value;
-                if length(electrodeSize)>1&&length(electrodeSize)~=length(chanlocs)
-                    error('the number of electrodeSize not equal to number of channel location');
-                end
-            case 'headlinewidth'
-                headLineWidth = Value;
-            case 'clim'
-                CLim = Value;
-                if numel(CLim)~=2
-                    error('Color Limit must be 1 x 2 vector');
-                end
-            case 'isinside'
-                isInside = Value;
-                if ~islogical(isInside)
-                    error('isInside must be true or false');
-                end
-            case 'isdirection'
-                isDir = Value;
-                if ~islogical(isDir)
-                    error('isInside must be true or false');
-                end
-            case 'plotchans'
-                plotchans = Value;
-            case 'textsize'
-                textSize = Value;
-            case 'axes'
-                ax2plot = Value;
-        end
-    end  
-end
+ax2plot = settings.axes;
+handles = struct();
 handles.axes = ax2plot;
-colormap(handles.axes,colorMap);
-%% Read channel location
-Th=[chanlocs.theta];
-Rd=[chanlocs.radius];
-Rd = Rd*plotrad/0.55;
-Th = pi/180*Th;                              % convert degrees to radians
-allchansind = 1:length(Th);
+hold(ax2plot, 'on');
+colormap(ax2plot, settings.colorMap);
 
-%% remove infinite and NaN values
-inds = [];
-if ~isempty(Values)
-    if istopo
-        Values = Values(:);
-    end
-    inds = union(find(isnan(Values)), find(isinf(Values))); % NaN and Inf values
+[xAll, yAll, validLocation] = chanlocsToTopoCoordinates(chanlocs, ...
+    settings.plotrad, settings.coordScale, eegtopoSet);
+plotchans = normalizePlotChans(settings.plotchans, numel(chanlocs), validLocation);
+if settings.isInside
+    channelRadius = getChannelRadius(chanlocs);
+    plotchans = plotchans(channelRadius(plotchans) < 0.5495);
 end
-for chani=1:length(chanlocs)
-    if isempty(chanlocs(chani).X); inds = [inds chani]; end
+
+x = xAll(plotchans);
+y = yAll(plotchans);
+allchansind = plotchans(:);
+headScale = settings.coordScale;
+
+drawHead(ax2plot, headScale, settings.headColor, settings.headLineWidth, eegtopoSet);
+configureAxes(ax2plot, headScale, settings.CLim, eegtopoSet);
+
+if isempty(Values)
+    plotElectrodes(ax2plot, x, y, chanlocs, plotchans, allchansind, settings);
+    title(ax2plot, [num2str(numel(plotchans)), ' of ', num2str(numel(chanlocs)), ' channels']);
+    return
 end
-if isInside
-    outs = find(Rd>=0.5495);
-    plotchans = setdiff(plotchans,outs);
+
+if isvector(Values) && ~(isrow(Values) && any(numel(Values) == [2 3]))
+    Values = Values(:);
 end
-plotchans   = setdiff(plotchans,inds);
 
-[x,y]       = pol2cart(Th,Rd);  % transform electrode locations from polar to cartesian coordinates
-plotchans   = abs(plotchans);   % reverse indicated channel polarities
-allchansind = allchansind(plotchans);
-x           = x(plotchans);
-y           = y(plotchans);
-Rd          = Rd(plotchans);
-% project the coordinates of electrodes
-
-yy = x*62.6; xx = y*62.6; yyt = xx;  yt = sqrt(344.^2-xx.^2).*sign(yy);
-yid = yy>0; yid2 = yy<=0;
-yyt(yid) = mean(predint(eegtopoSet.hhead,xx(yid)+409),2)-355.5;
-yyt(yid2) = mean(predint(eegtopoSet.lhead,xx(yid2)+409),2)-355.5;
-yy = yy.*(yyt./yt);
-yy(isnan(yy)) = 0;
-xx = xx*10;yy = yy*10;
-
-
-k = 1;
-%% Plot Head
-% cla(ax2plot)
-hold(ax2plot,'on');
-plot(ax2plot,eegtopoSet.Chead(:,1)/k,eegtopoSet.Chead(:,2)/k,'Color',headColor,'LineWidth',headLineWidth);
-plot(ax2plot,eegtopoSet.Cleft(:,1)/k,eegtopoSet.Cleft(:,2)/k,'Color',headColor,'LineWidth',headLineWidth);
-plot(ax2plot,eegtopoSet.Cright(:,1)/k,eegtopoSet.Cright(:,2)/k,'Color',headColor,'LineWidth',headLineWidth);
-plot(ax2plot,eegtopoSet.Cnose(:,1)/k,eegtopoSet.Cnose(:,2)/k,'Color',headColor,'LineWidth',headLineWidth);
-
-if strcmp(ELECTRODES,'off')
-    plot(ax2plot,xx/k,yy/k,'.','MarkerSize',0.001,'Color','none');
+if size(Values, 2) == 1
+    handles = plotTopoValues(handles, ax2plot, Values, xAll, yAll, plotchans, ...
+        headScale, chanlocs, allchansind, settings, eegtopoSet);
 else
-    if length(electrodeSize)>1
-        for numplot = 1:length(plotchans)
-            plot(ax2plot,xx(numplot)/k,yy(numplot)/k,'.','MarkerSize',electrodeSize(plotchans(numplot)),'Color',electrodeColor);
-            if strcmp(ELECTRODES,'labels')
-                text(ax2plot,xx(numplot)/k,yy(numplot)/k+1.2*electrodeSize(plotchans(numplot)),{chanlocs(plotchans).labels},'HorizontalAlignment','center',...
-                    'VerticalAlignment','middle','Color',textColor,'hittest','off','FontName','Arial','FontSize',textSize);
-            end
-            if strcmp(ELECTRODES,'numbers')
-                text(ax2plot,xx(numplot)/k,yy(numplot)/k+1.2*electrodeSize(plotchans(numplot)),num2str(allchansind(:)),'HorizontalAlignment','center',...
-                    'VerticalAlignment','middle','Color',textColor,'hittest','off','FontName','Arial','FontSize',textSize);
+    handles = plotConnectivity(handles, ax2plot, Values, xAll, yAll, plotchans, ...
+        settings);
+    plotElectrodes(ax2plot, x, y, chanlocs, plotchans, allchansind, settings);
+end
+end
 
+
+function settings = defaultSettings(chanlocs)
+settings = struct();
+settings.CONTOURNUM = 0;
+settings.ELECTRODES = 'on';
+settings.isInside = false;
+settings.isDir = false;
+settings.plotrad = 0.55;
+settings.SHADING = 'interp';
+settings.headColor = [0 0 0];
+settings.electrodeColor = [0 0 0];
+settings.textColor = [0 0 0];
+settings.lineColor = [0 0 0];
+settings.LineWidth = 2;
+settings.CLim = [0 1];
+settings.colorMap = CBar();
+settings.electrodeSize = 20;
+settings.headLineWidth = 1.5;
+settings.plotchans = 1:numel(chanlocs);
+settings.textSize = 10;
+settings.axes = gca;
+settings.gridScale = 90;
+settings.coordScale = 1;
+settings.boundaryAnchors = false;
+end
+
+
+function settings = parseOptions(settings, varargin)
+if mod(numel(varargin), 2) ~= 0
+    error('Optional inputs must be name-value pairs.');
+end
+for iter = 1:2:numel(varargin)
+    param = lower(string(varargin{iter}));
+    value = varargin{iter + 1};
+    switch param
+        case {'numcontour', 'contournum'}
+            settings.CONTOURNUM = value;
+        case 'electrodes'
+            settings.ELECTRODES = lower(char(value));
+        case 'plotrad'
+            settings.plotrad = value;
+        case 'shading'
+            settings.SHADING = char(value);
+            if ~any(strcmpi(settings.SHADING, {'flat', 'interp'}))
+                error('Invalid shading parameter.');
             end
+        case 'headcolor'
+            settings.headColor = validateRgb(value, 'headColor');
+        case {'electrodecolor', 'electrodcolor'}
+            settings.electrodeColor = validateRgb(value, 'electrodeColor');
+        case 'textcolor'
+            settings.textColor = validateRgb(value, 'textColor');
+        case 'linewidth'
+            settings.LineWidth = value;
+        case 'linecolor'
+            settings.lineColor = validateRgb(value, 'lineColor');
+        case 'colormap'
+            settings.colorMap = value;
+            if size(value, 2) ~= 3
+                error('Colormap must be an n x 3 matrix.');
+            end
+        case 'electrodesize'
+            settings.electrodeSize = value;
+        case 'headlinewidth'
+            settings.headLineWidth = value;
+        case 'clim'
+            settings.CLim = value;
+            if numel(settings.CLim) ~= 2 || any(~isfinite(settings.CLim)) || ...
+                    settings.CLim(2) <= settings.CLim(1)
+                error('Color Limit must be a finite increasing 1 x 2 vector.');
+            end
+        case 'isinside'
+            settings.isInside = logical(value);
+        case {'isdirection', 'isdir'}
+            settings.isDir = logical(value);
+        case 'plotchans'
+            settings.plotchans = value;
+        case 'textsize'
+            settings.textSize = value;
+        case 'axes'
+            settings.axes = value;
+        case 'gridscale'
+            settings.gridScale = max(25, min(180, round(value)));
+        case 'coordscale'
+            settings.coordScale = value;
+        case {'boundaryanchors', 'addboundaryanchors'}
+            settings.boundaryAnchors = logical(value);
+        otherwise
+            warning('Unknown Newtopoplot option: %s', param);
+    end
+end
+end
+
+
+function rgb = validateRgb(value, name)
+if ~isnumeric(value) || numel(value) ~= 3
+    error('%s must be a 1 x 3 RGB vector.', name);
+end
+rgb = reshape(value, 1, 3);
+end
+
+
+function eegtopoSet = resolveEegTopoSet(eegtopoSet)
+if ~isempty(eegtopoSet)
+    return
+end
+eegtopoSet = localEegTopoSet();
+end
+
+
+function eegtopoSet = localEegTopoSet()
+% Built-in copy of the geometry used by EEGtopoSet.mat. The head curves are
+% stored as their Fourier8 coefficients; the ear and nose curves are the
+% EEGtopoSet coordinates. This removes the runtime dependency on the MAT
+% file while preserving the same plotting geometry.
+eegtopoSet.hhead = struct("type", "fourier8", "coefficients", ...
+    [21798708279.957691,0,-160231800721.5354,-108325867622.62846, ...
+    228506186354.35034,189562035248.80185,-159518916384.29831, ...
+    -162287771308.86362,39167255257.567123,75247461951.686234, ...
+    19702999553.078663,-17296891158.970837,-16803818390.527815, ...
+    1198954600.9459865,4340245062.2400331,103360376.51658186, ...
+    -370783137.24359548,0.0014241313497940929]);
+eegtopoSet.lhead = struct("type", "fourier8", "coefficients", ...
+    [-35849355106.229042,0,140286489655.74344,121737002809.49521, ...
+    -142306872812.8967,-153520927668.53159,45724029439.306221, ...
+    92922028441.470245,24163927670.406849,-28524586322.936832, ...
+    -28965738408.707253,2734143122.6929584,11360422570.746656, ...
+    629514275.20374143,-1958078591.8373351,-127812412.7337594, ...
+    108990765.8826738,0.0014938449712378985]);
+
+upperX = [-344:-72, -66:63, 69:344].';
+lowerX = (344:-1:-344).';
+upperY = evaluateHeadCurve(eegtopoSet.hhead, upperX + 409) - 355.5;
+lowerY = evaluateHeadCurve(eegtopoSet.lhead, lowerX + 409) - 355.5;
+eegtopoSet.Chead = [upperX, upperY; lowerX, lowerY; upperX(1), upperY(1)];
+
+eegtopoSet.Cleft = [-344 -41.68323898;-345 -42.39538503;-346 -43.29046512;-347 -44.31084037;-348 -45.40718472;-349 -46.53754354;-350 -47.66697443;-351 -48.76683557;-352 -49.81452835;-353 -50.79220688;-354 -51.6871475;-355 -52.49074972;-356 -53.19801426;-357 -53.8073014;-358 -54.31974089;-359 -54.73892355;-360 -55.07039541;-361 -55.32126063;-362 -55.49992692;-363 -55.61568791;-364 -55.67844689;-365 -55.69817722;-366 -55.68502265;-367 -55.64872664;-368 -55.59850585;-369 -55.54283941;-370 -55.48931968;-371 -55.4441303;-372 -55.41228688;-373 -55.39738303;-374 -55.40132827;-375 -55.42423278;-376 -55.46458095;-377 -55.51875776;-378 -55.58150637;-379 -55.64549297;-380 -55.70124632;-381 -55.73767728;-382 -55.74153817;-383 -55.69775265;-384 -55.58957753;-385 -55.39835316;-386 -55.10410094;-387 -54.68507627;-388 -54.11842752;-389 -53.38008478;-390 -52.4450309;-391 -51.28744239;-392 -49.8810674;-393 -48.19935212;-394 -46.21568966;-395 -43.90385166;-396 -41.23808503;-397 -38.19371976;-398 -34.7471665;-399 -30.87648647;-400 -26.5621068;-400 2.58805955;-399 10.46149467;-398 17.23431928;-397 23.10049509;-396 28.22529623;-395 32.74805699;-394 36.78479992;-393 40.43074242;-392 43.76268147;-391 46.84125559;-390 49.71308207;-389 52.41276995;-388 54.9648071;-387 57.38532049;-386 59.68370977;-385 61.86415226;-384 63.92698018;-383 65.86992805;-382 67.68925087;-381 69.38071232;-380 70.94044199;-379 72.36566242;-377 74.81037097;-375 76.73381801;-374 77.51740196;-372 78.78650443;-371 79.30255305;-369 80.18737762;-368 80.59493492;-366 81.43508376;-363 82.97793904;-360 84.94392416;-358 86.25621177;-356 87.10739634;-354 86.77841703;-334.5 87.1];
+eegtopoSet.Cright = [344 -41.28316073;345 -42.76551886;346 -43.72401158;347 -44.51337294;348 -45.32848668;349 -46.25259691;350 -47.29595035;351 -48.42583049;352 -49.58901331;353 -50.72770707;354 -51.7900382;355 -52.73611426;356 -53.54063813;357 -54.19296891;358 -54.69542948;359 -55.06055263;360 -55.30784282;361 -55.46051258;362 -55.54253659;363 -55.57625558;364 -55.58066128;365 -55.57040367;366 -55.55548702;367 -55.54156162;368 -55.53067539;369 -55.52232388;370 -55.51462726;371 -55.50546885;372 -55.49344806;373 -55.47853128;374 -55.46232198;375 -55.44791564;376 -55.4393509;377 -55.44071353;378 -55.45499049;379 -55.48280516;380 -55.52118783;381 -55.56254668;382 -55.59400095;383 -55.59721824;384 -55.54886232;385 -55.42170474;386 -55.18638488;387 -54.81371957;389 -53.55654277;390 -52.63837504;391 -51.51936441;392 -50.20530571;393 -48.70891421;394 -47.04430267;395 -45.21737142;396 -43.21111028;397 -40.96477223;398 -38.34586858;399 -35.11395751;400 -30.8752554;401 -25.02719547;401 1.129532668;400 9.980072718;399 17.1083889;398 22.90109496;397 27.69308176;396 31.7645283;395 35.34058498;394 38.59344282;393 41.64641999;392 44.57963683;391 47.43681512;390 50.23272636;389 52.96082698;388 55.60065354;387 58.12460568;386 60.50381389;385 62.71287058;384 64.73328976;383 66.55564909;382 68.18045308;381 69.61783309;380 70.88626472;379 72.01053295;378 73.01920812;377 73.94190918;376 74.80662629;375 75.63735124;374 76.45222541;373 77.26236253;372 78.07144065;371 78.87608991;370 79.66703228;368 81.1522986;366 82.41248237;363 83.76225548;360 84.70842243;358 85.42240012;356 86.34483643;353 87.55650886;334.3 87.6];
+eegtopoSet.Cnose = [-71 442.3605258;-70 443.9130106;-69 445.2990442;-68 446.544838;-67 447.6752958;-66 448.713768;-65 449.681849;-64 450.5992194;-63 451.483532;-62 452.3503408;-61 453.2130709;-60 454.083027;-59 454.9694368;-58 455.8795256;-57 456.8186196;-56 457.7902718;-55 458.7964067;-54 459.8374804;-53 460.9126502;-52 462.0199505;-51 463.1564705;-50 464.3185298;-49 465.5018494;-48 466.7017141;-47 467.9131241;-46 469.1309343;-45 470.3499787;-44 471.5651795;-43 472.7716408;-42 473.9647246;-41 475.1401122;-40 476.2938493;-39 477.4223765;-38 478.5225471;-37 479.5916322;-36 480.6273159;-35 481.6276818;-34 482.5911919;-33 483.5166609;-32 484.4032263;-31 485.2503167;-30 486.0576193;-29 486.8250473;-28 487.5527098;-27 488.2408832;-26 488.8899859;-25 489.5005559;-24 490.0732326;-23 490.6087414;-22 491.1078817;-21 491.5715178;-20 492.0005726;-19 492.3960227;-18 492.7588949;-17 493.0902632;-16 493.3912462;-15 493.6630031;-14 493.9067288;-13 494.1236478;-12 494.3150051;-11 494.482056;-10 494.6260521;-9 494.7482265;-8 494.8497753;-7 494.9318389;-6 494.9954804;-5 495.0416638;-4 495.0712317;-3 495.0848836;-2 495.083155;-1 495.0663984;0 495.0347666;1 494.9881996;2 494.9264147;3 494.8489017;4 494.7549218;5 494.643512;6 494.5134952;7 494.3634941;8 494.1919515;9 493.9971546;10 493.7772639;11 493.5303457;12 493.2544085;13 492.9474409;14 492.6074518;15 492.2325115;16 491.820792;17 491.3706077;18 490.8804528;19 490.3490373;20 489.7753193;21 489.1585333;22 488.4982143;23 487.7942169;24 487.046729;25 486.256281;26 485.4237488;27 484.5503521;28 483.6376471;29 482.6875155;30 481.7021478;31 480.6840238;32 479.6358891;33 478.5607285;34 477.4617376;35 476.3422916;36 475.2059135;37 474.0562397;38 472.8969861;39 471.731912;40 470.5647847;41 469.3993418;42 468.2392539;43 467.0880848;44 465.9492518;45 464.8259825;46 463.7212706;47 462.6378283;48 461.5780359;49 460.5438879;50 459.5369351;51 458.5582237;52 457.6082293;53 456.6867886;54 455.793027;55 454.9252835;56 454.0810348;57 453.2568178;58 452.4481539;59 451.6494746;60 450.8540528;61 450.0539397;62 449.2399109;63 448.4014231;64 447.5265855;65 446.6021468;66 445.6135008;67 444.5447136;68 443.3785743;69 442.0966704];
+end
+
+
+function [xPlot, yPlot, validLocation] = chanlocsToTopoCoordinates(chanlocs, plotrad, coordScale, eegtopoSet)
+channelCount = numel(chanlocs);
+theta = nan(1, channelCount);
+radius = nan(1, channelCount);
+for ch = 1:channelCount
+    if isfield(chanlocs(ch), 'theta') && ~isempty(chanlocs(ch).theta)
+        theta(ch) = chanlocs(ch).theta;
+    end
+    if isfield(chanlocs(ch), 'radius') && ~isempty(chanlocs(ch).radius)
+        radius(ch) = chanlocs(ch).radius;
+    elseif isfield(chanlocs(ch), 'radiu') && ~isempty(chanlocs(ch).radiu)
+        radius(ch) = chanlocs(ch).radiu;
+    end
+end
+
+radius = radius * plotrad / 0.55;
+[polarX, polarY] = pol2cart(theta * pi / 180, radius);
+
+% Original Newtopoplot projection: xPlot is based on polarY; yPlot is based
+% on polarX and warped to the EEGtopoSet upper/lower head boundary.
+xPlot = polarY * 62.6;
+yRaw = polarX * 62.6;
+limitX = max(abs(eegtopoSet.Chead(:, 1)));
+headMidX = 409;
+headMidY = 355.5;
+denominator = sqrt(max(0, limitX .^ 2 - xPlot .^ 2)) .* sign(yRaw);
+upper = yRaw > 0;
+targetY = xPlot;
+targetY(upper) = evaluateHeadCurve(eegtopoSet.hhead, xPlot(upper) + headMidX) - headMidY;
+targetY(~upper) = evaluateHeadCurve(eegtopoSet.lhead, xPlot(~upper) + headMidX) - headMidY;
+yPlot = yRaw .* (targetY ./ denominator);
+yPlot(~isfinite(yPlot)) = 0;
+
+xPlot = xPlot * 10 * coordScale;
+yPlot = yPlot * 10 * coordScale;
+validLocation = isfinite(xPlot) & isfinite(yPlot);
+end
+
+
+function radius = getChannelRadius(chanlocs)
+radius = nan(1, numel(chanlocs));
+for ch = 1:numel(chanlocs)
+    if isfield(chanlocs(ch), 'radius') && ~isempty(chanlocs(ch).radius)
+        radius(ch) = chanlocs(ch).radius;
+    elseif isfield(chanlocs(ch), 'radiu') && ~isempty(chanlocs(ch).radiu)
+        radius(ch) = chanlocs(ch).radiu;
+    end
+end
+end
+
+
+function plotchans = normalizePlotChans(plotchans, channelCount, validLocation)
+plotchans = unique(abs(plotchans(:).'), 'stable');
+plotchans = plotchans(plotchans >= 1 & plotchans <= channelCount);
+plotchans = plotchans(validLocation(plotchans));
+end
+
+
+function y = evaluateHeadCurve(curve, x)
+if isa(curve, 'cfit')
+    y = feval(curve, x(:));
+    y = reshape(y, size(x));
+elseif isstruct(curve) && isfield(curve, 'type') && strcmp(curve.type, 'fourier8')
+    coefficients = curve.coefficients;
+    a0 = coefficients(1);
+    w = coefficients(end);
+    y = a0 + zeros(size(x));
+    cursor = 2;
+    for harmonic = 1:8
+        a = coefficients(cursor);
+        b = coefficients(cursor + 1);
+        y = y + a * cos(harmonic * x * w) + b * sin(harmonic * x * w);
+        cursor = cursor + 2;
+    end
+else
+    y = polyval(curve, x);
+end
+end
+
+
+function drawHead(ax, headScale, headColor, headLineWidth, eegtopoSet)
+[head, leftEar, rightEar, nose] = eegTopoSetOutline(headScale, eegtopoSet);
+plot(ax, head(:, 1), head(:, 2), 'Color', headColor, 'LineWidth', headLineWidth);
+plot(ax, leftEar(:, 1), leftEar(:, 2), 'Color', headColor, 'LineWidth', headLineWidth);
+plot(ax, rightEar(:, 1), rightEar(:, 2), 'Color', headColor, 'LineWidth', headLineWidth);
+plot(ax, nose(:, 1), nose(:, 2), 'Color', headColor, 'LineWidth', headLineWidth);
+end
+
+
+function configureAxes(ax, headScale, CLim, eegtopoSet)
+[head, leftEar, rightEar, nose] = eegTopoSetOutline(headScale, eegtopoSet);
+outline = [head; leftEar; rightEar; nose];
+xMargin = 0.04 * range(outline(:, 1));
+yMargin = 0.04 * range(outline(:, 2));
+set(ax, 'XTick', [], 'YTick', [], 'DataAspectRatio', [1 1 1], ...
+    'XLim', [min(outline(:, 1)) - xMargin, max(outline(:, 1)) + xMargin], ...
+    'YLim', [min(outline(:, 2)) - yMargin, max(outline(:, 2)) + yMargin], ...
+    'CLim', CLim, 'XColor', [0.9 0.95 1], 'YColor', [0.9 0.95 1], ...
+    'ZColor', [0.9 0.95 1], 'Visible', 'off');
+set(ax.Parent, 'Color', [1 1 1]);
+end
+
+
+function [head, leftEar, rightEar, nose] = eegTopoSetOutline(headScale, eegtopoSet)
+head = eegtopoSet.Chead * headScale;
+leftEar = eegtopoSet.Cleft * headScale;
+rightEar = eegtopoSet.Cright * headScale;
+nose = eegtopoSet.Cnose * headScale;
+end
+
+
+function handles = plotTopoValues(handles, ax, Values, xAll, yAll, plotchans, ...
+        headScale, chanlocs, allchansind, settings, eegtopoSet)
+if numel(Values) < max(plotchans)
+    error('Values length must match channel count for topography plotting.');
+end
+values = Values(plotchans);
+finite = isfinite(values) & isfinite(xAll(plotchans)).' & isfinite(yAll(plotchans)).';
+
+plotX = xAll(plotchans);
+plotY = yAll(plotchans);
+plotX = plotX(finite);
+plotY = plotY(finite);
+plotValues = values(finite);
+
+[headOutline, ~, ~, ~] = eegTopoSetOutline(headScale, eegtopoSet);
+[Xi, Yi, coverX, coverY, localMask] = topoInterpolationGrid( ...
+    plotX, plotY, plotchans, chanlocs, settings, headScale, eegtopoSet);
+
+if numel(plotValues) >= 3
+    interpX = plotX(:);
+    interpY = plotY(:);
+    interpValues = plotValues(:);
+    if settings.boundaryAnchors
+        boundaryIndex = unique(round(linspace(1, size(headOutline, 1), 80)));
+        boundaryX = headOutline(boundaryIndex, 1);
+        boundaryY = headOutline(boundaryIndex, 2);
+        boundaryValue = repmat(mean(plotValues, 'omitnan'), numel(boundaryIndex), 1);
+        interpX = [interpX; boundaryX];
+        interpY = [interpY; boundaryY];
+        interpValues = [interpValues; boundaryValue];
+    end
+    [interpX, interpY, interpValues] = mergeDuplicatePoints(interpX, interpY, interpValues);
+    if numel(interpValues) >= 3 && rank([interpX - mean(interpX), interpY - mean(interpY)]) >= 2
+        Zi = griddata(interpX, interpY, interpValues, Xi, Yi, 'v4');
+        if any(isnan(Zi(:)))
+            nearestZi = griddata(interpX, interpY, interpValues, Xi, Yi, 'nearest');
+            Zi(isnan(Zi)) = nearestZi(isnan(Zi));
         end
     else
-
-        plot(ax2plot,xx/k,yy/k,'.','MarkerSize',electrodeSize,'Color',electrodeColor);
-        if strcmp(ELECTRODES,'labels')
-            text(ax2plot,xx/k,yy/k+1.2*electrodeSize,{chanlocs(plotchans).labels},'HorizontalAlignment','center',...
-                'VerticalAlignment','middle','Color',textColor,'hittest','off','FontName','Arial','FontSize',textSize);
-        end
-        if strcmp(ELECTRODES,'numbers')
-            text(ax2plot,xx/k,yy/k+1.2*electrodeSize,num2str(allchansind(:)),'HorizontalAlignment','center',...
-                'VerticalAlignment','middle','Color',textColor,'hittest','off','FontName','Arial','FontSize',textSize);
-
-        end
+        Zi = nan(size(Xi));
     end
-end
-Rratio = max(1,max(Rd)/0.55);
-set(ax2plot,'Xtick',[],'Ytick',[],'DataAspectRatio',[0.9,1,1],'xlim',[-450/k,450/k]*Rratio,...
-    'Ylim',[-420/k,520/k]*Rratio,'clim',CLim,'Xcolor',[0.9 0.95 1],'Ycolor',[0.9 0.95 1],'Zcolor',[0.9 0.95 1],'visible','off');
-% axis off
-set(ax2plot.Parent,'Color',[1 1 1]);
-if isempty(Values)
-    title([num2str(length(plotchans)),' of ',num2str(length(Th)),' channels']);
-end
-if ~isempty(Values)
-    
-    if size(Values,2)==1 && istopo
-        % Plot topo weight/energy values
-        Values = Values(plotchans,:);
-        if ~isInside && max(Rd)>=0.5495
-            % if some channel to plot is outside the head
-            [mRd,mid] = max(Rd);
-            ratio = mRd/0.5495;
-            
-            xi = round(-344*ratio*1.1):5:round(344*ratio*1.1);
-            yi = round(-349*ratio*1.1)-5:5:round(446*ratio*1.1);
-            
-            [Xi,Yi,Zi] = griddata(xx,yy,Values,xi,yi','v4');
-%             Zi = smooth2a(Zi,5,5);
-            fXi = Xi(1,:);
-            [Y_upLimit,Y_lowLimit] = outEllip(abs(xx(mid)),(yy(mid)),fXi);
-            mask = Yi>repmat(Y_upLimit,size(Xi,1),1)|Yi<repmat(Y_lowLimit,size(Xi,1),1);
-            Zi(mask==1) = NaN;
-            [Xi,Yi,Zi] = sdownsample(Xi,Yi,Zi,k);
-            [Y_upLimit,Y_lowLimit,fXi] = vdownsample(Y_upLimit,Y_lowLimit,fXi,k);
-            ringx = [[fXi,fXi(end:-1:1),fXi(1)]*1.05,[fXi,fXi(end:-1:1),fXi(1)]*0.97];
-            ringy = [[Y_upLimit*1.1,Y_lowLimit(end:-1:1)*1.1,Y_upLimit(1)*1.1],...
-                [Y_upLimit*0.98,Y_lowLimit(end:-1:1)*0.96,Y_upLimit(1)*0.98]];
-           
-        else
-            xi = [max(min(xx),-344),min(max(xx),344)];
-            yi = [min(yy),max(yy)];
-            x0 = mean(xi); y0 = mean(yi);
-            xit = linspace(((xi(1)-x0)*sqrt(2)*1.3+x0),((xi(end)-x0)*sqrt(2)*1.3+x0),...
-                max(150,round((xi(2)-xi(1))/1)));
-            
-            yit = linspace(((yi(1)-y0)*sqrt(2)*1.3+y0),((yi(end)-y0)*sqrt(2)*1.3+y0),...
-                max(150,round((yi(2)-yi(1))/1)));
-            [Xi,Yi,Zi] = griddata(xx,yy,Values,xit,yit','v4');
-%             Zi = smooth2a(Zi,3,3);
-            fXi = Xi(1,:);
-            outId = abs(fXi)>344;
-            [tup,tlow] = inEllip(x0,y0,1.1*(max(abs(xi-x0)))+x0,1.1*(max(abs(yi-y0)))+y0,fXi);
-            Y_upLimit = mean(predint(eegtopoSet.hhead,fXi+409),2)-355.5;
-            Y_lowLimit = mean(predint(eegtopoSet.lhead,fXi+409),2)-355.5;
-            Y_lowLimit(outId) = 0;
-            Y_upLimit(outId) = 0;
-            Y_upLimit = min(Y_upLimit(:),tup(:));
-            Y_lowLimit = max(Y_lowLimit(:),tlow(:));
-            Y_upLimit = Y_upLimit';
-            Y_lowLimit = Y_lowLimit';
-            
-            tup = Y_upLimit(~outId);
-            tlow = Y_lowLimit(~outId);
-            fXi = fXi(~outId);
-            fXi = fXi-x0;
-            fXi(fXi<0) = fXi(fXi<0)+0;
-            [Xi,Yi,Zi] = sdownsample(Xi,Yi,Zi,k);
-            [tup,tlow,fXi] = vdownsample(tup,tlow,fXi,k);
-            ringx = [[Xi(1,:),Xi(1,end:-1:1),Xi(1,1)],[fXi,fXi(end:-1:1),fXi(1)]+x0];
-            ringy = [[Yi(1,:),Yi(end,:),Yi(1,1)],...
-                [y0+(tup-y0),y0+(tlow(end:-1:1)-y0),y0+(tup(1)-y0)]];
-            
-            
-        end
-        
-        handles.hsuf = surface(ax2plot,Xi,Yi,zeros(size(Zi)),Zi,'EdgeColor','none','FaceColor',SHADING,...
-            'FaceLighting','gouraud');
-        
-        patch(ax2plot,ringx,ringy,zeros(size(ringx)),[1 1 1],'edgecolor','none');
-        ax2plot.Children = [ax2plot.Children(3:end);ax2plot.Children(1);ax2plot.Children(2)];
-        if CONTOURNUM>0
-            contour(ax2plot,Xi,Yi,Zi,CONTOURNUM,'LineColor','k');
-            ax2plot.Children = [ax2plot.Children(2:end-1);ax2plot.Children(1);ax2plot.Children(end)];
-        end
-    elseif size(Values,2)>1
-        % plot connectivity map
-        ChanPair = Values(:,1:2);
-        selfIdx = (ChanPair(:,1)==ChanPair(:,2));
-        ChanPair(selfIdx,:) = [];
-        [vlist,tlist] = ismember(ChanPair,plotchans);
-        vlist = and(vlist(:,1),vlist(:,2));
-        ChanPair = tlist(vlist,:);
-        Values = Values(vlist,:);
-        if max(ChanPair(:))>length(chanlocs)|| min(ChanPair(:))<1
-            error('Out of channel numbers')
-        end
-        if size(Values,2)==3
-            lineC = Values(:,3);
-            if (max(lineC)==min(lineC))
-                color2plot = repmat(lineColor,size(Values,1),1);
-            else
-                %             lineC = (lineC-min(lineC));
-                cm = colorMap;
-%                 lineC = lineC*abs(diff(CLim))/(max(lineC)-min(lineC));
-%                 lineC = lineC+min(CLim)-min(lineC);
-                lineC = round((lineC-min(CLim))/abs(diff(CLim))*(size(cm,1)-1))+1;
-                lineC(lineC<1) = 1; lineC(lineC>size(cm,1)) = size(cm,1);
-                color2plot = cm(lineC,:);
-            end
-        else
-            color2plot = repmat(lineColor,size(Values,1),1);
-        end
-        if isDir
-            Ddist = sqrt((xx(ChanPair(:,1))-xx(ChanPair(:,2))).^2+(yy(ChanPair(:,1))-yy(ChanPair(:,2))).^2);
-            arrowLen = max(min(min(Ddist)/3,15),10);
-            for ki = 1:size(ChanPair,1)
-                set(gcf,'CurrentAxes',ax2plot);
-                arrow([xx(ChanPair(ki,1)),yy(ChanPair(ki,1))],[xx(ChanPair(ki,2)),yy(ChanPair(ki,2))],...
-                    [electrodeSize(1);electrodeSize(1)],'width',LineWidth,'length',arrowLen,...
-                    'TipAngle',15,'FaceColor',color2plot(ki,:),'EdgeColor','none');
-            end
-        else
-            for ki = 1:size(ChanPair,1)
-                line(ax2plot,xx(ChanPair(ki,:)),yy(ChanPair(ki,:)),'LineWidth',LineWidth,...
-                    'Color',color2plot(ki,:));
-            end
-        end
+    if isempty(coverX)
+        Zi(localMask) = nan;
     end
-end
-% pbaspect(ax2plot,[1 1 1]);
-% daspect(ax2plot,[1 1 1]);
-
-end
-
-
-
-function matrixOut = smooth2a(matrixIn,Nr,Nc)
-% Smooths 2D array data.  Ignores NaN's.
-%
-%function matrixOut = smooth2a(matrixIn,Nr,Nc)
-%
-% This function smooths the data in matrixIn using a mean filter over a
-% rectangle of size (2*Nr+1)-by-(2*Nc+1).  Basically, you end up replacing
-% element "i" by the mean of the rectange centered on "i".  Any NaN
-% elements are ignored in the averaging.  If element "i" is a NaN, then it
-% will be preserved as NaN in the output.  At the edges of the matrix,
-% where you cannot build a full rectangle, as much of the rectangle that
-% fits on your matrix is used (similar to the default on Matlab's builtin
-% function "smooth").
-%
-% "matrixIn": original matrix
-% "Nr": number of points used to smooth rows
-% "Nc": number of points to smooth columns.  If not specified, Nc = Nr.
-%
-% "matrixOut": smoothed version of original matrix
-%
-%
-% 	Written by Greg Reeves, March 2009.
-% 	Division of Biology
-% 	Caltech
-%
-% 	Inspired by "smooth2", written by Kelly Hilands, October 2004
-% 	Applied Research Laboratory
-% 	Penn State University
-%
-% 	Developed from code written by Olof Liungman, 1997
-% 	Dept. of Oceanography, Earth Sciences Centre
-% 	G锟絫eborg University, Sweden
-% 	E-mail: olof.liungman@oce.gu.se
-
-%
-% Initial error statements and definitions
-%
-if nargin < 2, error('Not enough input arguments!'), end
-
-N(1) = Nr;
-if nargin < 3, N(2) = N(1); else N(2) = Nc; end
-
-if length(N(1)) ~= 1, error('Nr must be a scalar!'), end
-if length(N(2)) ~= 1, error('Nc must be a scalar!'), end
-
-%
-% Building matrices that will compute running sums.  The left-matrix, eL,
-% smooths along the rows.  The right-matrix, eR, smooths along the
-% columns.  You end up replacing element "i" by the mean of a (2*Nr+1)-by-
-% (2*Nc+1) rectangle centered on element "i".
-%
-[row,col] = size(matrixIn);
-eL = spdiags(ones(row,2*N(1)+1),(-N(1):N(1)),row,row);
-eR = spdiags(ones(col,2*N(2)+1),(-N(2):N(2)),col,col);
-
-%
-% Setting all "NaN" elements of "matrixIn" to zero so that these will not
-% affect the summation.  (If this isn't done, any sum that includes a NaN
-% will also become NaN.)
-%
-A = isnan(matrixIn);
-matrixIn(A) = 0;
-
-%
-% For each element, we have to count how many non-NaN elements went into
-% the sums.  This is so we can divide by that number to get a mean.  We use
-% the same matrices to do this (ie, "eL" and "eR").
-%
-nrmlize = eL*(~A)*eR;
-nrmlize(A) = NaN;
-
-%
-% Actually taking the mean.
-%
-matrixOut = eL*matrixIn*eR;
-matrixOut = matrixOut./nrmlize;
+    handles.hsuf = surface(ax, Xi, Yi, zeros(size(Zi)), Zi, ...
+        'EdgeColor', 'none', 'FaceColor', settings.SHADING, ...
+        'FaceLighting', 'gouraud');
+else
+    Zi = nan(size(Xi));
+    handles.hsuf = surface(ax, Xi, Yi, zeros(size(Zi)), Zi, ...
+        'EdgeColor', 'none', 'FaceColor', settings.SHADING);
 end
 
-function [upY,lowY] = outEllip(x,y,Xi)
-if y>0
-    kup = sqrt((y)^2/446^2+(x)^2/344^2);
-    kdown = kup;
-end
-if y<=0
-    kdown = sqrt((y)^2/350^2+(x)^2/344^2);
-    kup = kdown;
+if ~isempty(coverX)
+    drawCoverPatches(ax, coverX, coverY);
 end
 
-upY = (kup^2*446^2-446^2/344^2.*(Xi.^2));
-
-
-
-lowY = (kdown^2*350^2-350^2/344^2.*(Xi.^2));
-upY(upY<0) = 0;
-lowY(lowY<0) = 0;
-upY = sqrt(upY)*1.05;
-lowY = -sqrt(lowY)*1.1;
+if settings.CONTOURNUM > 0 && any(isfinite(Zi(:)))
+    contour(ax, Xi, Yi, Zi, settings.CONTOURNUM, 'LineColor', 'k');
 end
 
-function [upY,lowY] = inEllip(x0,y0,x,y,Xi)
+drawHead(ax, headScale, settings.headColor, settings.headLineWidth, eegtopoSet);
+plotElectrodes(ax, xAll(plotchans), yAll(plotchans), chanlocs, plotchans, ...
+    allchansind, settings);
+end
 
-r1 = 2*(y-y0)^2;
-r2 = 2*(x-x0)^2;
-yt = ((r1-r1/r2*(Xi-x0).^2));
-yt(yt<0) = 0;
+
+function [x, y, values] = mergeDuplicatePoints(x, y, values)
+xy = round([x(:), y(:)] * 1e10) / 1e10;
+[~, ~, group] = unique(xy, 'rows');
+values = accumarray(group, values(:), [], @mean);
+x = accumarray(group, x(:), [], @mean);
+y = accumarray(group, y(:), [], @mean);
+end
+
+
+function [Xi, Yi, coverX, coverY, localMask] = topoInterpolationGrid( ...
+        plotX, plotY, plotchans, chanlocs, settings, headScale, eegtopoSet)
+channelRadius = getChannelRadius(chanlocs) * settings.plotrad / 0.55;
+plottedRadius = channelRadius(plotchans);
+plottedRadius = plottedRadius(isfinite(plottedRadius));
+hasOutsideElectrode = ~settings.isInside && ~isempty(plottedRadius) && ...
+    max(plottedRadius) >= 0.55;
+
+if hasOutsideElectrode
+    [~, farthestLocalIndex] = max(hypot(plotX, plotY));
+    ratio = max(plottedRadius) / 0.55;
+    xAxis = linspace(-344 * headScale * ratio * 1.16, ...
+        344 * headScale * ratio * 1.16, settings.gridScale);
+    yAxis = linspace((-349 * ratio * 1.16 - 5) * headScale, ...
+        446 * headScale * ratio * 1.16, settings.gridScale);
+    [Xi, Yi] = meshgrid(xAxis, yAxis);
+    [upperLimit, lowerLimit] = outEllipScaled(abs(plotX(farthestLocalIndex)), ...
+        plotY(farthestLocalIndex), Xi(1, :), headScale, eegtopoSet);
+    regionX = Xi(1, :);
+    regionUpper = upperLimit;
+    regionLower = lowerLimit;
+    [regionPolyX, regionPolyY] = regionFromUpperLower(regionX, regionUpper, regionLower);
+    localMask = ~inpolygon(Xi, Yi, regionPolyX, regionPolyY);
+    [coverX, coverY] = coverPatchesFromLimits(Xi, Yi, regionX, regionUpper, regionLower);
+    return
+end
+
+if isempty(plotX)
+    [headOutline, ~, ~, ~] = eegTopoSetOutline(headScale, eegtopoSet);
+    xRange = [min(headOutline(:, 1)), max(headOutline(:, 1))];
+    yRange = [min(headOutline(:, 2)), max(headOutline(:, 2))];
+elseif isWholeHeadTopo(plotchans, chanlocs)
+    xRange = [-344, 344] * headScale;
+    headSampleX = linspace(xRange(1), xRange(2), settings.gridScale);
+    [headUpperEdge, headLowerEdge] = headLimitsScaled(headSampleX, headScale, eegtopoSet);
+    yRange = [min(headLowerEdge), max(headUpperEdge)];
+else
+    xRange = [max(min(plotX), -344 * headScale), min(max(plotX), 344 * headScale)];
+    yRange = [min(plotY), max(plotY)];
+end
+
+if diff(xRange) <= eps
+    xRange = xRange + [-1 1] * 25 * headScale;
+end
+if diff(yRange) <= eps
+    yRange = yRange + [-1 1] * 25 * headScale;
+end
+
+x0 = mean(xRange);
+y0 = mean(yRange);
+if isWholeHeadTopo(plotchans, chanlocs)
+    xAxis = linspace(xRange(1), xRange(2), settings.gridScale);
+    yAxis = linspace(yRange(1), yRange(2), settings.gridScale);
+else
+    xAxis = linspace((xRange(1) - x0) * sqrt(2) * 1.3 + x0, ...
+        (xRange(2) - x0) * sqrt(2) * 1.3 + x0, settings.gridScale);
+    yAxis = linspace((yRange(1) - y0) * sqrt(2) * 1.3 + y0, ...
+        (yRange(2) - y0) * sqrt(2) * 1.3 + y0, settings.gridScale);
+end
+[Xi, Yi] = meshgrid(xAxis, yAxis);
+
+fXi = Xi(1, :);
+if isWholeHeadTopo(plotchans, chanlocs)
+    boundaryX = fXi;
+else
+    boundaryX = linspace(-344 * headScale, 344 * headScale, settings.gridScale);
+end
+outId = abs(boundaryX) > 344 * headScale;
+[ellipseUpper, ellipseLower] = inEllipScaled(x0, y0, ...
+    1.1 * max(abs(xRange - x0)) + x0, ...
+    1.1 * max(abs(yRange - y0)) + y0, boundaryX);
+[headUpper, headLower] = headLimitsScaled(boundaryX, headScale, eegtopoSet);
+headUpper(outId) = 0;
+headLower(outId) = 0;
+upperLimit = min(headUpper(:), ellipseUpper(:)).';
+lowerLimit = max(headLower(:), ellipseLower(:)).';
+regionX = boundaryX(~outId);
+regionUpper = upperLimit(~outId);
+regionLower = lowerLimit(~outId);
+[regionPolyX, regionPolyY] = regionFromUpperLower(regionX, regionUpper, regionLower);
+localMask = ~inpolygon(Xi, Yi, regionPolyX, regionPolyY);
+[coverX, coverY] = coverPatchesFromLimits(Xi, Yi, regionX, regionUpper, regionLower);
+end
+
+
+function wholeHead = isWholeHeadTopo(plotchans, chanlocs)
+wholeHead = numel(plotchans) >= max(8, ceil(0.75 * numel(chanlocs)));
+end
+
+
+function [regionX, regionY] = regionFromUpperLower(x, upper, lower)
+regionX = [x, x(end:-1:1), x(1)];
+regionY = [upper, lower(end:-1:1), upper(1)];
+end
+
+
+function [coverX, coverY] = coverPatchesFromLimits(Xi, Yi, regionX, regionUpper, regionLower)
+outerLeft = min(Xi(:));
+outerRight = max(Xi(:));
+outerBottom = min(Yi(:));
+outerTop = max(Yi(:));
+leftEdge = min(regionX);
+rightEdge = max(regionX);
+coverX = cell(1, 4);
+coverY = cell(1, 4);
+coverX{1} = [regionX, regionX(end:-1:1), regionX(1)];
+coverY{1} = [regionUpper, outerTop + zeros(size(regionX)), regionUpper(1)];
+coverX{2} = [regionX, regionX(end:-1:1), regionX(1)];
+coverY{2} = [regionLower, outerBottom + zeros(size(regionX)), regionLower(1)];
+coverX{3} = [outerLeft, leftEdge, leftEdge, outerLeft, outerLeft];
+coverY{3} = [outerBottom, outerBottom, outerTop, outerTop, outerBottom];
+coverX{4} = [rightEdge, outerRight, outerRight, rightEdge, rightEdge];
+coverY{4} = [outerBottom, outerBottom, outerTop, outerTop, outerBottom];
+end
+
+
+function drawCoverPatches(ax, coverX, coverY)
+backgroundColor = axesBackgroundColor(ax);
+if iscell(coverX)
+    for patchIndex = 1:numel(coverX)
+        if isempty(coverX{patchIndex})
+            continue
+        end
+        patch(ax, coverX{patchIndex}, coverY{patchIndex}, ...
+            zeros(size(coverX{patchIndex})), backgroundColor, 'EdgeColor', 'none');
+    end
+else
+    patch(ax, coverX, coverY, zeros(size(coverX)), backgroundColor, 'EdgeColor', 'none');
+end
+end
+
+
+function [upper, lower] = headLimitsScaled(x, headScale, eegtopoSet)
+xUnscaled = x / headScale;
+upper = (evaluateHeadCurve(eegtopoSet.hhead, xUnscaled + 409) - 355.5) * headScale;
+lower = (evaluateHeadCurve(eegtopoSet.lhead, xUnscaled + 409) - 355.5) * headScale;
+end
+
+
+function [upper, lower] = outEllipScaled(x, y, xi, headScale, eegtopoSet)
+x = x / headScale;
+y = y / headScale;
+xi = xi / headScale;
+headX = eegtopoSet.Chead(:, 1);
+headY = eegtopoSet.Chead(:, 2);
+headRight = max(abs(headX));
+headUpper = max(headY);
+headLower = abs(min(headY));
+upperRadiusX = headRight*1.1;
+lowerRadiusX = headRight * 1.1;
+upperScale = max(1, sqrt((max(y, 0)) ^ 2 / headUpper ^ 2 + (x) ^ 2 / upperRadiusX ^ 2));
+lowerScale = max(1, sqrt((max(-y, 0)) ^ 2 / headLower ^ 2 + (x) ^ 2 / lowerRadiusX ^ 2));
+upper = upperScale ^ 2 * headUpper ^ 2 - headUpper ^ 2 / upperRadiusX ^ 2 .* (xi .^ 2);
+lower = lowerScale ^ 2 * headLower ^ 2 - headLower ^ 2 / lowerRadiusX ^ 2 .* (xi .^ 2);
+upper(upper < 0) = 0;
+lower(lower < 0) = 0;
+upper = sqrt(upper) * 1.05 * headScale;
+lower = -sqrt(lower) * 1.1 * headScale;
+end
+
+
+function [upper, lower] = inEllipScaled(x0, y0, x, y, xi)
+r1 = 2 * (y - y0) ^ 2;
+r2 = 2 * (x - x0) ^ 2;
+if r2 <= eps
+    upper = y0 + zeros(size(xi));
+    lower = y0 + zeros(size(xi));
+    return
+end
+yt = r1 - r1 / r2 * (xi - x0) .^ 2;
+yt(yt < 0) = 0;
 yt = sqrt(yt);
-upY = (yt*1.1+y0);
-lowY = (-yt*1.1+y0);
-
+upper = yt * 1.1 + y0;
+lower = -yt * 1.1 + y0;
 end
 
-function cbars = CBar
-cbars = [0.8 0 0;0.8 0.4 0;0.8 0.8 0;0.4 0.8 0.4;0 0.8 0.8;0 0.4 0.8;0 0 0.8];
-% cbars = [68 104 188;116 139 209;174 188 225;220 218 229;251 235 220;254 221 150;232 160 108]/255;
-% cbars = [251 245 247;244 226 240;217 204 222;237 184 204;241 184 201]/255;
-cbars = lineInterp(cbars,256,8);
-cbars = cbars(end:-1:1,:);
+
+function color = axesBackgroundColor(ax)
+color = get(ax.Parent, 'Color');
+if ischar(color) || isstring(color) || numel(color) ~= 3
+    color = [1 1 1];
+end
 end
 
-function Cbar = lineInterp(cbar,cnum,pernum)
-np = size(cbar,1);
-nump = max(round(cnum/(np-1)),pernum);
-for ic = 1:3
-    tcolor = cbar(:,ic);
-    ncolor = [];
-    for itc = 1:np-1
-        ncolor = [ncolor,linspace(tcolor(itc),tcolor(itc+1),nump)];
+
+function plotElectrodes(ax, x, y, chanlocs, plotchans, allchansind, settings)
+if strcmp(settings.ELECTRODES, 'off')
+    plot(ax, x, y, '.', 'MarkerSize', 0.001, 'Color', 'none');
+    return
+end
+
+plot(ax, x, y, '.', 'MarkerSize', settings.electrodeSize, ...
+    'Color', settings.electrodeColor);
+labelOffset = 1.2 * settings.electrodeSize * settings.coordScale;
+if strcmp(settings.ELECTRODES, 'labels')
+    labels = getChanLabels(chanlocs, plotchans);
+    text(ax, x, y + labelOffset, labels, 'HorizontalAlignment', 'center', ...
+        'VerticalAlignment', 'middle', 'Color', settings.textColor, ...
+        'HitTest', 'off', 'FontName', 'Arial', 'FontSize', settings.textSize);
+elseif strcmp(settings.ELECTRODES, 'numbers')
+    text(ax, x, y + labelOffset, num2str(allchansind(:)), ...
+        'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', ...
+        'Color', settings.textColor, 'HitTest', 'off', ...
+        'FontName', 'Arial', 'FontSize', settings.textSize);
+end
+end
+
+
+function labels = getChanLabels(chanlocs, plotchans)
+labels = cell(1, numel(plotchans));
+for index = 1:numel(plotchans)
+    channelIndex = plotchans(index);
+    if isfield(chanlocs(channelIndex), 'labels') && ~isempty(chanlocs(channelIndex).labels)
+        labels{index} = chanlocs(channelIndex).labels;
+    else
+        labels{index} = num2str(channelIndex);
     end
-    Cbar(:,ic) = ncolor';
-end
-if size(Cbar,1)>cnum
-    Cbar(round(end/2),:)=[];
 end
 end
 
-function [x,y,z] = sdownsample(x,y,z,k)
-x = x/k; y = y/k;
-t1 = size(x,1); t2 = size(x,2);
-if k>=min(t1,t2)
-   error('too large k value') 
-end
-x = x(:,round(1:(t2-1)/(t2/k-1):t2));
-x = x(round(1:(t1-1)/(t1/k-1):t1),:);
-y = y(:,round(1:(t2-1)/(t2/k-1):t2));
-y = y(round(1:(t1-1)/(t1/k-1):t1),:);
-z = z(:,round(1:(t2-1)/(t2/k-1):t2));
-z = z(round(1:(t1-1)/(t1/k-1):t1),:);
+
+function handles = plotConnectivity(handles, ax, Values, xAll, yAll, plotchans, settings)
+chanPair = Values(:, 1:2);
+selfIdx = chanPair(:, 1) == chanPair(:, 2);
+chanPair(selfIdx, :) = [];
+Values(selfIdx, :) = [];
+
+[isMember, localPair] = ismember(chanPair, plotchans);
+validPair = isMember(:, 1) & isMember(:, 2);
+chanPair = localPair(validPair, :);
+Values = Values(validPair, :);
+if isempty(chanPair)
+    handles.connectivityLines = gobjects(0);
+    return
 end
 
-function [ul,dl,fxi] = vdownsample(ul,dl,fxi,k)
-ul = ul/k;
-dl = dl/k;
-fxi = fxi/k;
-try
-ul = ul(round(1:(length(ul)-1)/(length(ul)/k-1):length(ul)));
-dl = dl(round(1:(length(dl)-1)/(length(dl)/k-1):length(dl)));
-fxi = fxi(round(1:(length(fxi)-1)/(length(fxi)/k-1):length(fxi)));
-catch
-    error('too large k value');
-end 
+if size(Values, 2) >= 3
+    color2plot = valuesToColors(Values(:, 3), settings.CLim, settings.colorMap, settings.lineColor);
+else
+    color2plot = repmat(settings.lineColor, size(Values, 1), 1);
 end
 
+plotX = xAll(plotchans);
+plotY = yAll(plotchans);
+handles.connectivityLines = gobjects(size(chanPair, 1), 1);
+for index = 1:size(chanPair, 1)
+    startPoint = [plotX(chanPair(index, 1)), plotY(chanPair(index, 1))];
+    endPoint = [plotX(chanPair(index, 2)), plotY(chanPair(index, 2))];
+    if settings.isDir
+        handles.connectivityLines(index) = drawDirectedLine(ax, startPoint, endPoint, ...
+            color2plot(index, :), settings.LineWidth, settings.coordScale);
+    else
+        handles.connectivityLines(index) = line(ax, [startPoint(1) endPoint(1)], ...
+            [startPoint(2) endPoint(2)], 'LineWidth', settings.LineWidth, ...
+            'Color', color2plot(index, :));
+    end
+end
+end
+
+
+function color2plot = valuesToColors(values, CLim, colorMap, fallbackColor)
+if numel(values) == 1 || all(values == values(1))
+    color2plot = repmat(fallbackColor, numel(values), 1);
+    return
+end
+scaled = (values - CLim(1)) ./ max(diff(CLim), eps);
+scaled = max(0, min(1, scaled));
+indices = round(scaled * (size(colorMap, 1) - 1)) + 1;
+color2plot = colorMap(indices, :);
+end
+
+
+function h = drawDirectedLine(ax, startPoint, endPoint, color, lineWidth, coordScale)
+vector = endPoint - startPoint;
+distance = hypot(vector(1), vector(2));
+if distance <= eps
+    h = gobjects(1);
+    return
+end
+unit = vector / distance;
+trim = min(distance * 0.12, 15 * coordScale);
+lineEnd = endPoint - unit * trim;
+h = line(ax, [startPoint(1) lineEnd(1)], [startPoint(2) lineEnd(2)], ...
+    'LineWidth', lineWidth, 'Color', color);
+
+normal = [-unit(2), unit(1)];
+arrowLength = max(min(distance / 3, 15 * coordScale), 10 * coordScale);
+arrowWidth = arrowLength * 0.45;
+tip = endPoint - unit * trim * 0.25;
+base = tip - unit * arrowLength;
+patch(ax, [tip(1), base(1) + normal(1) * arrowWidth, base(1) - normal(1) * arrowWidth], ...
+    [tip(2), base(2) + normal(2) * arrowWidth, base(2) - normal(2) * arrowWidth], ...
+    color, 'EdgeColor', 'none');
+end
+
+
+function cbars = CBar()
+cbars = [0.8 0 0; 0.8 0.4 0; 0.8 0.8 0; 0.4 0.8 0.4; ...
+    0 0.8 0.8; 0 0.4 0.8; 0 0 0.8];
+cbars = lineInterp(cbars, 256, 8);
+cbars = cbars(end:-1:1, :);
+end
+
+
+function cbar = lineInterp(baseMap, cnum, pernum)
+pointCount = size(baseMap, 1);
+pointsPerSegment = max(round(cnum / (pointCount - 1)), pernum);
+cbar = zeros((pointCount - 1) * pointsPerSegment, 3);
+cursor = 1;
+for segmentIndex = 1:(pointCount - 1)
+    segmentRows = cursor:(cursor + pointsPerSegment - 1);
+    for colorIndex = 1:3
+        cbar(segmentRows, colorIndex) = linspace(baseMap(segmentIndex, colorIndex), ...
+            baseMap(segmentIndex + 1, colorIndex), pointsPerSegment);
+    end
+    cursor = cursor + pointsPerSegment;
+end
+if size(cbar, 1) > cnum
+    cbar(round(end / 2), :) = [];
+end
+end
