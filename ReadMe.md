@@ -52,3 +52,9 @@ fix bug for channel-to-plot selection when plotting connectivity maps.
 fix bug for wrong error reporting when the GUI is closed.
 
 change the background color of topograph
+
+1.1.2
+
+fix bug for 1-dimension connectivity input 
+
+the Newtopoplot.m now does not require EEGtopoSet.mat, but it keeps the input for compatibility.
